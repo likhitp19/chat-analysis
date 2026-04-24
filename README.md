@@ -56,6 +56,23 @@ Opens at `http://localhost:8501`.
 
 Expected CSV columns: `session_id`, `scenario_title`, `scenario_id`, `mode`, `started_at`, `timestamp`, `sender`, `text`, `message_id`, `message_count`, `message_type`, `suggestions`
 
+## 🚀 Railway Deployment
+
+This repository is ready for deployment on [Railway](https://railway.app/).
+
+### Option 1: Deploy Both Dashboards (Recommended)
+To run both the **Streamlit** and **Flask** dashboards simultaneously:
+1.  Connect this repo to Railway.
+2.  Create **two separate services** from the same repository.
+3.  For the **Streamlit** service, set the **Start Command** to:
+    `streamlit run dashboard.py --server.port $PORT --server.address 0.0.0.0`
+4.  For the **Flask** service, set the **Start Command** to:
+    `python web_app.py`
+5.  Don't forget to add your `GOOGLE_API_KEY` to the environment variables of the Streamlit service!
+
+### Option 2: Choose One
+If you only want one, you can just use the default `railway.toml` which runs the Streamlit dashboard, or change the `startCommand` in `railway.toml`.
+
 ---
 
 ## Topic Explorer
