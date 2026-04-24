@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 import pandas as pd
 import plotly.express as px
@@ -55,21 +56,58 @@ def expand_cat(code: str) -> str:
 
 GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 
+STALL_REASONS = [
+    "user gave short answers",
+    "user went off-topic",
+    "riya asked too many questions at once",
+    "riya response was too long / overwhelming",
+    "topic exhausted naturally",
+    "user confusion / misunderstanding",
+    "other",
+]
+
+RIYA_GAPS = [
+    "missed follow-up on interesting user detail",
+    "did not correct grammar error",
+    "response too formal / not conversational",
+    "changed topic abruptly",
+    "asked closed question instead of open",
+    "over-explained / lectured",
+    "did not encourage struggling user",
+    "other",
+]
+
 ANALYSIS_PROMPT = """\
 You are analyzing a conversation between a user learning English and an AI tutor called Riya.
 
 Conversation (turn number — speaker: text):
 {conversation}
 
-Respond with ONLY valid JSON matching this schema exactly:
+Respond with ONLY valid JSON matching this schema exactly — no extra fields, no markdown:
 {{
-  "topic": "<one short label, e.g. career advice, daily routine, travel plans>",
-  "user_intent": "<one of: free chat | specific practice | asking questions | other>",
-  "energy_peak_turn": <integer turn number where user was most expressive>,
-  "stall_turn": <integer turn number where conversation lost energy, or null>,
-  "stall_reason": "<one line on why it stalled, or null>",
-  "riya_gap": "<one line on what Riya missed or could have done better, or null>"
+  "topic": "<2-4 word lowercase label, e.g. daily routine, travel plans, job interview>",
+  "user_intent": "<exactly one of: free chat | specific practice | asking questions | other>",
+  "energy_peak_turn": <integer — turn number where user was most expressive>,
+  "stall_turn": <integer — turn number where conversation lost energy, or null if no stall>,
+  "stall_reason": "<exactly one of: {stall_reasons}, or null if no stall>",
+  "riya_gap": "<exactly one of: {riya_gaps}, or null if Riya did well>"
 }}"""
+
+MASTER_PROMPT = """\
+You are a product analyst reviewing {n} conversations between users learning English and an AI tutor called Riya.
+
+Here is a structured summary of each session's analysis:
+{summaries}
+
+Write a concise product analysis report in plain text (no markdown headers, no bullet symbols).
+Cover these four areas in order, each as a short paragraph:
+
+1. TOP THEMES & PATTERNS — What do users talk about most? Are there recurring conversation arcs?
+2. WHERE CONVERSATIONS STALL — What are the most common stall points and why?
+3. RIYA'S BIGGEST GAPS — What does Riya repeatedly miss or do poorly?
+4. RECOMMENDATIONS — Give exactly 3 to 5 specific, actionable things the Riya team should fix or improve.
+
+Be direct and specific. Use numbers where possible (e.g. "42% of sessions stalled because...")."""
 
 
 def get_gemini_key() -> str:
@@ -102,6 +140,12 @@ def build_conversation(session_id: str, raw_df: pd.DataFrame) -> tuple:
 _MAX_CONV_CHARS = 6000
 
 
+def _response_text(resp) -> str:
+    """Extract text from a Gemini response without triggering thought_signature warnings."""
+    parts = resp.candidates[0].content.parts
+    return "".join(p.text for p in parts if hasattr(p, "text") and p.text)
+
+
 def analyze_session(session_id: str, turns: list, api_key: str) -> dict:
     import time
     conv_text = "\n".join(
@@ -109,7 +153,11 @@ def analyze_session(session_id: str, turns: list, api_key: str) -> dict:
     )
     if len(conv_text) > _MAX_CONV_CHARS:
         conv_text = conv_text[:_MAX_CONV_CHARS] + "\n[conversation truncated]"
-    prompt = ANALYSIS_PROMPT.format(conversation=conv_text)
+    prompt = ANALYSIS_PROMPT.format(
+        conversation=conv_text,
+        stall_reasons=" | ".join(STALL_REASONS),
+        riya_gaps=" | ".join(RIYA_GAPS),
+    )
     client = genai.Client(api_key=api_key)
     for attempt in range(4):
         try:
@@ -120,16 +168,33 @@ def analyze_session(session_id: str, turns: list, api_key: str) -> dict:
                     response_mime_type="application/json",
                 ),
             )
-            result = json.loads(resp.text)
+            result = json.loads(_response_text(resp))
             result["session_id"] = session_id
             return result
-        except genai.errors.ClientError as exc:
+        except genai_errors.ClientError as exc:
             if exc.code == 429 and attempt < 3:
                 time.sleep(2 ** attempt * 2)  # 2s, 4s, 8s
                 continue
             raise
         except (json.JSONDecodeError, KeyError):
             raise ValueError(f"Unparseable JSON for session {session_id}")
+    raise RuntimeError(f"All retry attempts exhausted for session {session_id}")
+
+
+def run_master_analysis(results_list: list, api_key: str) -> str:
+    lines = []
+    for r in results_list:
+        if "error" in r:
+            continue
+        lines.append(
+            f"topic={r.get('topic', '?')} | intent={r.get('user_intent', '?')} | "
+            f"stall={r.get('stall_reason') or 'none'} | gap={r.get('riya_gap') or 'none'}"
+        )
+    summaries = "\n".join(lines)
+    prompt = MASTER_PROMPT.format(n=len(lines), summaries=summaries)
+    client = genai.Client(api_key=api_key)
+    resp = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+    return _response_text(resp).strip()
 
 
 @st.cache_data
@@ -1051,6 +1116,7 @@ elif page == "Topic Explorer":
             st.session_state["te_results"] = results
             st.session_state["te_filter_key"] = current_filter_key
             st.session_state["te_turns_map"] = turns_map
+            st.session_state.pop("te_master_text", None)
             st.success(f"Done — {len(results)} sessions analyzed.")
 
     # ── Results ──────────────────────────────────────────────────────────────
@@ -1187,3 +1253,19 @@ elif page == "Topic Explorer":
                                 st.markdown(f"👤 **User (Turn {t['turn']}):** {t['text']}")
             else:
                 st.info("No sessions found for the selected topic.")
+
+            # ── Master Analysis ───────────────────────────────────────────────
+            st.divider()
+            st.subheader("Master Analysis")
+            st.caption(f"Synthesises all {len(ok_results)} successfully analysed sessions into one report.")
+
+            if st.button("Run Master Analysis", key="te_master_btn"):
+                with st.spinner("Gemini is synthesising all sessions…"):
+                    try:
+                        master_text = run_master_analysis(ok_results, api_key)
+                        st.session_state["te_master_text"] = master_text
+                    except Exception as e:
+                        st.error(f"Master analysis failed: {e}")
+
+            if st.session_state.get("te_master_text"):
+                st.info(st.session_state["te_master_text"])
