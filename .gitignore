@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+ENV/
+
+# Environment variables
+.env
+
+# Data (optional - if you want to keep them out of git)
+# merged_sessions_messages.csv
+# User chat_ call raw - Raw.csv
+
+# OS
+.DS_Store
