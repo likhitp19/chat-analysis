@@ -23,6 +23,11 @@ def static_files(path):
     return send_from_directory("dashboard_web", path)
 
 
+@app.route("/healthz")
+def healthz():
+    return "OK", 200
+
+
 def build_data():
     """Generate dashboard_web/data.js from the CSV before serving."""
     try:

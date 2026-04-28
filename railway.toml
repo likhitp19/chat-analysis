@@ -1,5 +1,6 @@
 [build]
 builder = "NIXPACKS"
+buildCommand = "python generate_data.py"
 
 [deploy]
 # To run Streamlit: streamlit run dashboard.py --server.port $PORT --server.address 0.0.0.0
