@@ -3,10 +3,6 @@ builder = "NIXPACKS"
 buildCommand = "python generate_data.py"
 
 [deploy]
-# To run Streamlit: streamlit run dashboard.py --server.port $PORT --server.address 0.0.0.0
-# To run Flask: python web_app.py
-# By default, we'll run Streamlit. You can change this in the Railway dashboard "Start Command" setting.
-startCommand = "streamlit run dashboard.py --server.port $PORT --server.address 0.0.0.0"
 healthcheckPath = "/healthz"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
