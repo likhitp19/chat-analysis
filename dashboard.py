@@ -1045,7 +1045,7 @@ elif page == "Topic Explorer":
     st.divider()
 
     # ── Tab-level filters ────────────────────────────────────────────────────
-    f1, f2 = st.columns([2, 1])
+    f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
     with f1:
         te_min_date = session_df["date"].min()
         te_max_date = session_df["date"].max()
@@ -1061,6 +1061,19 @@ elif page == "Topic Explorer":
             "Min user messages per session", 1, 20, 4, key="te_min_msgs",
             help="Only include sessions where the user sent at least this many messages",
         )
+    with f3:
+        te_max_msgs = st.slider(
+            "Max user messages per session", 1, 50, 50, key="te_max_msgs",
+            help="Only include sessions where the user sent at most this many messages. Lower this to focus on low-engagement sessions.",
+        )
+    with f4:
+        te_mode = st.selectbox(
+            "Mode",
+            options=["All", "chat", "voice"],
+            index=0,
+            key="te_mode",
+            help="Filter by interaction mode — analyse chat and voice/call sessions separately",
+        )
 
     # Candidate sessions — Talk with Riya only
     ft_sessions = session_df[session_df["is_freetalk"]].copy()
@@ -1068,13 +1081,22 @@ elif page == "Topic Explorer":
         ft_sessions = ft_sessions[
             (ft_sessions["date"] >= te_date_range[0]) & (ft_sessions["date"] <= te_date_range[1])
         ]
-    ft_sessions = ft_sessions[ft_sessions["user_messages"] >= te_min_msgs]
+    ft_sessions = ft_sessions[
+        (ft_sessions["user_messages"] >= te_min_msgs) &
+        (ft_sessions["user_messages"] <= te_max_msgs)
+    ]
+    if te_mode != "All":
+        ft_sessions = ft_sessions[ft_sessions["mode"] == te_mode]
     candidate_ids = ft_sessions["session_id"].tolist()
 
-    st.info(f"**{len(candidate_ids)} sessions** qualify with current filters (Talk with Riya, ≥{te_min_msgs} user messages).")
+    mode_label = f" | {te_mode} only" if te_mode != "All" else ""
+    if te_max_msgs < 50:
+        st.info(f"**{len(candidate_ids)} sessions** qualify with current filters (Talk with Riya{mode_label}, {te_min_msgs}–{te_max_msgs} user messages).")
+    else:
+        st.info(f"**{len(candidate_ids)} sessions** qualify with current filters (Talk with Riya{mode_label}, ≥{te_min_msgs} user messages).")
 
     # ── Filter fingerprint for stale-result detection ─────────────────────────
-    current_filter_key = f"{te_date_range}|{te_min_msgs}"
+    current_filter_key = f"{te_date_range}|{te_min_msgs}|{te_max_msgs}|{te_mode}"
     if (
         "te_results" in st.session_state
         and st.session_state.get("te_filter_key") != current_filter_key
